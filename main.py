@@ -1,10 +1,14 @@
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
-from astrbot.api import logger
+from astrbot.api import logger, AstrBotConfig
 import math
+import random
+import os
+import json
+from typing import Tuple, Optional, Dict
 
 @register("iie_useful_utils", "Golden_millet", "提供一些实用的小功能。", "1.0", "https://github.com/GoldenMillet/astrbot_plugin_iie_useful_utils")
-class MyPlugin(Star):
+class IIE_UU_Plugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
@@ -21,6 +25,7 @@ class MyPlugin(Star):
         # 计数器，记录每个用户说了多少话
         self.user_counters: Dict[str, int] = {}
         self.UU_load_counters()
+        logger.info(f"发言名单已加载，用户名单共 {len(self.user_counters)} 个")
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
@@ -29,12 +34,10 @@ class MyPlugin(Star):
     @filter.command("help")
     async def UU_help(self, event: AstrMessageEvent):
         """查看帮助""" # 这是 handler 的描述，将会被解析方便用户了解插件内容。建议填写。
-        user_name = event.get_sender_name()
-        message_str = event.message_str # 用户发的纯文本消息字符串
         message_chain = event.get_messages() # 用户所发的消息的消息链 # from astrbot.api.message_components import *
         logger.info(message_chain)
 
-        yield event.plain_result(f"微调工具箱：\n查看所有人的当前状态: /uuls\n清空某个人的数据: /uuclr\n修改上下限: /uuset") # 发送一条纯文本消息
+        yield event.plain_result(f"iie抄底群机器人微调工具箱：\n查看所有人的当前状态: /uuls\n清空某个人的数据: /uuclr\n修改上下限: /uuset") # 发送一条纯文本消息
 
     @filter.command("uuls")
     async def UU_ls(self, event: AstrMessageEvent):
@@ -63,8 +66,13 @@ class MyPlugin(Star):
         else:
             self.down_bound = down
             self.up_bound = up
+
+    @filter.command("ping")
+    async def UU_pingpong(self, event: AstrMessageEvent):
+        """ping pong"""
+        yield event.plain_result(f"嗨呀，这里是信工所学妹啦~不是杭高院的智能菇学姐啦~我可不会回答你pong哟~") # 发送一条纯文本消息
     
-    def UU_load_counters():
+    def UU_load_counters(self):
         """加载用户说话次数记录"""
         # 加载计数器
         try:
@@ -73,7 +81,7 @@ class MyPlugin(Star):
                     counters_temp = json.load(f)
                     # 确保所有值都是整数类型
                     for key in counters_temp:
-                        self.user_counters[key] = int(self.counters_temp[key])
+                        self.user_counters[key] = int(counters_temp[key])
             else:
                 self.user_counters = {}
         except (json.JSONDecodeError, Exception) as e:
@@ -96,25 +104,26 @@ class MyPlugin(Star):
         sender_id = str(event.get_sender_id())
 
         # 直接从 self.config 获取最新的用户黑名单并检查
-        listed_users = set(str(uid) for uid in self.config.get("signed_users", []))
-        if sender_id in listed_users:
+        if sender_id in self.user_counters:
             return True, "user", sender_id
 
         return False, None, None
     
     @filter.event_message_type(filter.EventMessageType.ALL, priority=10)
     async def UU_check_list(self, event: AstrMessageEvent):
-        """检查黑名单"""
+        """检查名单"""
         # 检查是否在已记录的列表中
         is_listed, blacklist_type, target_id = self.UU_check_blacklist_status(event)
+        sender_id = str(event.get_sender_id())
+        values_temp = self.user_counters[sender_id]
+        logger.info(f"debug=============={values_temp}")
 
         if not is_listed:
             # 如果不在列表里，则记录并设置为1
-            sender_id = str(event.get_sender_id())            
             self.user_counters[sender_id] = 1
             return
         else:
-            reply_probability = UU_calculate_reply_probability(self.user_counters[sender_id], self.down_bound, self.up_bound)
+            reply_probability = self.UU_calculate_reply_probability(values_temp)
             reply_probability = max(0.0, min(1.0, reply_probability))
 
             # 决定是否回复
@@ -122,13 +131,12 @@ class MyPlugin(Star):
             random_value = random.random()
             sender_name = event.get_sender_name() or "未知用户"
 
-            # 拦截
+            # 拦截的情况
             if random_value > reply_probability:
                 should_suppress_reply = True
-                if log_messages:
-                    message_preview = event.message_str[:50] + ("..." if len(event.message_str) > 50 else "")
-                    log_identifier = f"用户: {sender_name}({target_id})"
-                    logger.info(f"依照概率拦截 - {log_identifier},消息: {message_preview}, 拦截计数: {self.user_counters[sender_id]}, 当前概率为: {int(reply_probability * 100)}%")
+                message_preview = event.message_str[:50] + ("..." if len(event.message_str) > 50 else "")
+                log_identifier = f"用户: {sender_name}({target_id})"
+                logger.info(f"依照概率拦截 - {log_identifier},消息: {message_preview}, 拦截计数: {self.user_counters[sender_id]}, 当前概率为: {int(reply_probability * 100)}%")
             # 不拦截
             else:
                 self.user_counters[sender_id] += 1                
@@ -159,16 +167,16 @@ class MyPlugin(Star):
             # 清除标记，避免对同一事件对象的后续影响
             event.set_extra("useful_utils_suppress_reply", False)
 
-    def UU_calculate_reply_probability(num: int, down: int, up: int):
-        if num <= down:
+    def UU_calculate_reply_probability(self, num: int):
+        if num <= self.down_bound:
             return float(1)
-        elif num >= up:
+        elif num >= self.up_bound:
             return float(0)
         else:
-            ratio = (num - down) / (up - down)
+            ratio = (num - self.down_bound) / (self.up_bound - self.down_bound)
             return 0.5 * (1 + math.cos(math.pi * ratio))
         
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
         self.UU_save_counters()
-        logger.info("弱黑名单插件已停用，拦截计数已保存。")
+        logger.info("iie调整插件已停用，拦截计数已保存。")

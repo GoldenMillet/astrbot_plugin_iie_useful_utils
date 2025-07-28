@@ -1,7 +1,7 @@
 # 基本信息
-C01_QQ_ID = 1978522237
+C01_QQ_ID = $YOUR_BOT_QQ_ID_HERE$
 C01_QQ_ID_STR = f"{C01_QQ_ID}"
-C01_QQ_NICKNAME = "群机器人 - 墨提斯小姐"
+C01_QQ_NICKNAME = $YOUR_BOT_NAME_HERE$
 
 # /help帮助弹出的消息
 C01_HELP_MSG_F = f"""iie抄底群机器人微调工具箱:
@@ -27,5 +27,5 @@ C01_PING_MSG = "嗨呀，这里是信工所学妹啦~不是杭高院的智能菇
 C01_INVALID_DATA_MSG = "输入的数据非法！"
 
 # 信工所导师名单与考情分析URL
-C01_PROFFESOR_LIST_URL = "http://ys-e.ysepan.com/wap/nextstationmnp/T9N3Lfb1RMAKhcFRcM/N8IBHd935EhRkHtNOal0PT95Bgp6PO/2024_prof_list.pdf"
-C01_EXAM_DETAILS_URL = "http://ys-e.ysepan.com/wap/nextstationmnp/T9N3Lfb1RMAKhcFRcM/N8IBHd935EhRHgtNPal0PT95Bhp6PO/2025_exam_report.pdf"
+C01_PROFFESOR_LIST_URL = $YOUR_URL_HERE$
+C01_EXAM_DETAILS_URL = $YOUR_URL_HERE$

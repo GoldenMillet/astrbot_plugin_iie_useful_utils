@@ -1,14 +1,8 @@
 {
   "log_blocked_messages": {
-    "description": "是否记录被拦截的消息",
+    "description": "是否在后台日志记录拦截的情况",
     "type": "bool",
     "default": true,
-    "hint": "开启后会在日志中记录哪些消息因弱黑名单被拦截"
-  },
-  "signed_users": {
-    "description": "设定的用户列表",
-    "type": "list",
-    "default": [],
-    "hint": "NULL"
+    "hint": "开启后会在日志中记录哪些消息被拦截"
   }
 }

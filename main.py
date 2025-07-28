@@ -7,7 +7,7 @@ import os
 import json
 from typing import Tuple, Optional, Dict
 
-@register("iie_useful_utils", "Golden_millet", "提供一些实用的小功能。", "1.0", "https://github.com/GoldenMillet/astrbot_plugin_iie_useful_utils")
+@register("iie_useful_utils", "Golden_millet", "基于 AstrBot 的群机器人的功能拓展", "1.0", "https://github.com/GoldenMillet/astrbot_plugin_iie_useful_utils")
 class IIE_UU_Plugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -37,12 +37,17 @@ class IIE_UU_Plugin(Star):
         message_chain = event.get_messages() # 用户所发的消息的消息链 # from astrbot.api.message_components import *
         logger.info(message_chain)
 
-        yield event.plain_result(f"iie抄底群机器人微调工具箱：\n查看所有人的当前状态: /uuls\n清空某个人的数据: /uuclr\n修改上下限: /uuset") # 发送一条纯文本消息
+        yield event.plain_result(f"iie抄底群机器人微调工具箱：\n查看所有人的当前状态: /uuls\n清空某个人的数据: /uuclr\n清空所有人的数据: /uuclrall\n修改上下限: /uuset") # 发送一条纯文本消息
 
     @filter.command("uuls")
     async def UU_ls(self, event: AstrMessageEvent):
         """查看所有人的记录"""
-        yield event.plain_result(f"{str(self.user_counters)}")
+        ret = ""
+        for key, value in self.user_counters.items():
+            deny_probability_temp = 100 - int(self.UU_calculate_reply_probability(value) * 100)
+            ret = ret + f"用户 - {key}\n累计对话次数: {value} 次\n下次对话拒绝概率为: {deny_probability_temp}%\n\n"
+
+        yield event.plain_result(ret[:-2])
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("uuclr")
@@ -50,10 +55,22 @@ class IIE_UU_Plugin(Star):
         """删除某个人的信息"""
         try:
             del self.user_counters[target]
+            temp = f"已经重置 {target} 的发言记录"
+            logger.error(temp)
+            yield event.plain_result(temp)
         except (json.JSONDecodeError, Exception) as e:
             temp = f"删除错误: {target} 不存在"
             logger.error(temp)
             yield event.plain_result(temp)
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("uuclrall")
+    async def UU_clr_all(self, event: AstrMessageEvent):
+        """删除全部人的信息"""
+        self.user_counters = {}
+        temp = f"已经重置本群内所有人的发言记数，现在大家又可以畅所欲言了！"
+        logger.error(temp)
+        yield event.plain_result(temp)
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("uuset")
@@ -112,17 +129,23 @@ class IIE_UU_Plugin(Star):
     @filter.event_message_type(filter.EventMessageType.ALL, priority=10)
     async def UU_check_list(self, event: AstrMessageEvent):
         """检查名单"""
+
+        # 如果是管理员或者没有at，则跳过
+        if event.is_at_or_wake_command == False:
+            return
+
         # 检查是否在已记录的列表中
         is_listed, blacklist_type, target_id = self.UU_check_blacklist_status(event)
         sender_id = str(event.get_sender_id())
-        values_temp = self.user_counters[sender_id]
-        logger.info(f"debug=============={values_temp}")
 
         if not is_listed:
             # 如果不在列表里，则记录并设置为1
             self.user_counters[sender_id] = 1
+            # logger.info(f"debug==============1")
             return
         else:
+            values_temp = self.user_counters[sender_id]
+            # logger.info(f"debug=============={values_temp}")
             reply_probability = self.UU_calculate_reply_probability(values_temp)
             reply_probability = max(0.0, min(1.0, reply_probability))
 
@@ -137,9 +160,11 @@ class IIE_UU_Plugin(Star):
                 message_preview = event.message_str[:50] + ("..." if len(event.message_str) > 50 else "")
                 log_identifier = f"用户: {sender_name}({target_id})"
                 logger.info(f"依照概率拦截 - {log_identifier},消息: {message_preview}, 拦截计数: {self.user_counters[sender_id]}, 当前概率为: {int(reply_probability * 100)}%")
-            # 不拦截
+            
+            # 不拦截，如果是管理员或者没有at，则跳过
             else:
-                self.user_counters[sender_id] += 1                
+                if not event.is_admin():
+                    self.user_counters[sender_id] += 1                
 
         # 设置事件标记
         event.set_extra("useful_utils_suppress_reply", should_suppress_reply)

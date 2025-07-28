@@ -1,5 +1,5 @@
 name: iie_useful_utils # 这是你的插件的唯一识别名。
-desc: 提供一些实用的小功能。 # 插件简短描述
+desc: 基于 AstrBot 的群机器人的功能拓展 # 插件简短描述
 version: v1.0 # 插件版本号。格式：v1.1.1 或者 v1.1
 author: Golden_millet # 作者
 repo: https://github.com/GoldenMillet/astrbot_plugin_iie_useful_utils # 插件的仓库地址

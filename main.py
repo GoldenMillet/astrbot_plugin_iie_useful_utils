@@ -1,11 +1,14 @@
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
-import math
+import astrbot.api.message_components as Comp
 import random
 import os
 import json
 from typing import Tuple, Optional, Dict
+
+from .constants.C01_help_msgs import C01_HELP_MSG_F, C01_CLEAR_ALL_MSG, C01_PING_MSG, C01_INVALID_DATA_MSG, C01_QQ_ID, C01_QQ_NICKNAME, C01_PROFFESOR_LIST_URL, C01_EXAM_DETAILS_URL
+from .utils.T01_intercept_msgs import T01_calculate_reply_probability, T01_load_counters, T01_save_counters, T01_check_blacklist_status
 
 @register("iie_useful_utils", "Golden_millet", "基于 AstrBot 的群机器人的功能拓展", "1.0", "https://github.com/GoldenMillet/astrbot_plugin_iie_useful_utils")
 class IIE_UU_Plugin(Star):
@@ -13,18 +16,18 @@ class IIE_UU_Plugin(Star):
         super().__init__(context)
         self.config = config
 
-        # 开始限制的上下限
-        self.up_bound = 70
-        self.down_bound = 50
+        # T01 - 发言开始限制的上下限
+        self.up_bound = 50
+        self.down_bound = 25
 
-        # 初始化说话次数计数器存储路径
+        # T01 - 初始化说话次数计数器存储路径
         self.data_dir = os.path.join("data", "UsefulUtils")
         os.makedirs(self.data_dir, exist_ok=True)
         self.user_counters_path = os.path.join(self.data_dir, "user_counters.json")
 
-        # 计数器，记录每个用户说了多少话
+        # T01 - 计数器，记录每个用户说了多少话
         self.user_counters: Dict[str, int] = {}
-        self.UU_load_counters()
+        self.user_counters = T01_load_counters(self.user_counters_path, self.user_counters)
         logger.info(f"发言名单已加载，用户名单共 {len(self.user_counters)} 个")
 
     async def initialize(self):
@@ -37,17 +40,25 @@ class IIE_UU_Plugin(Star):
         message_chain = event.get_messages() # 用户所发的消息的消息链 # from astrbot.api.message_components import *
         logger.info(message_chain)
 
-        yield event.plain_result(f"iie抄底群机器人微调工具箱：\n查看所有人的当前状态: /uuls\n清空某个人的数据: /uuclr\n清空所有人的数据: /uuclrall\n修改上下限: /uuset") # 发送一条纯文本消息
+        yield event.plain_result(C01_HELP_MSG_F) # 发送一条纯文本消息
 
     @filter.command("uuls")
     async def UU_ls(self, event: AstrMessageEvent):
         """查看所有人的记录"""
         ret = ""
         for key, value in self.user_counters.items():
-            deny_probability_temp = 100 - int(self.UU_calculate_reply_probability(value) * 100)
+            deny_probability_temp = 100 - int(T01_calculate_reply_probability(value, self.down_bound, self.up_bound) * 100)
             ret = ret + f"用户 - {key}\n累计对话次数: {value} 次\n下次对话拒绝概率为: {deny_probability_temp}%\n\n"
 
-        yield event.plain_result(ret[:-2])
+        # 折叠为合并转发
+        node = Comp.Node(
+            uin=C01_QQ_ID,
+            name=C01_QQ_NICKNAME,
+            content=[
+                Comp.Plain(ret[:-2])
+            ]
+        )
+        yield event.chain_result([node])
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("uuclr")
@@ -68,7 +79,7 @@ class IIE_UU_Plugin(Star):
     async def UU_clr_all(self, event: AstrMessageEvent):
         """删除全部人的信息"""
         self.user_counters = {}
-        temp = f"已经重置本群内所有人的发言记数，现在大家又可以畅所欲言了！"
+        temp = C01_CLEAR_ALL_MSG
         logger.error(temp)
         yield event.plain_result(temp)
 
@@ -77,7 +88,7 @@ class IIE_UU_Plugin(Star):
     async def UU_set(self, event: AstrMessageEvent, down: int, up: int):
         """设定上下限"""
         if (down < 0 or up < 0 or down >= up):
-            temp = f"输入的数据非法！"
+            temp = C01_INVALID_DATA_MSG
             logger.error(temp)
             yield event.plain_result(temp)
         else:
@@ -87,44 +98,31 @@ class IIE_UU_Plugin(Star):
     @filter.command("ping")
     async def UU_pingpong(self, event: AstrMessageEvent):
         """ping pong"""
-        yield event.plain_result(f"嗨呀，这里是信工所学妹啦~不是杭高院的智能菇学姐啦~我可不会回答你pong哟~") # 发送一条纯文本消息
+        yield event.plain_result(C01_PING_MSG) # 发送一条纯文本消息
     
-    def UU_load_counters(self):
-        """加载用户说话次数记录"""
-        # 加载计数器
-        try:
-            if os.path.exists(self.user_counters_path):
-                with open(self.user_counters_path, 'r', encoding='utf-8') as f:
-                    counters_temp = json.load(f)
-                    # 确保所有值都是整数类型
-                    for key in counters_temp:
-                        self.user_counters[key] = int(counters_temp[key])
-            else:
-                self.user_counters = {}
-        except (json.JSONDecodeError, Exception) as e:
-            logger.error(f"加载用户发言计数器失败: {e}")
-            self.user_counters = {}
+    @filter.command("uuproflist")
+    async def UU_professor_list(self, event: AstrMessageEvent):
+        """查看信工所当前导师名单"""
+        chain = [
+            Comp.At(qq=event.get_sender_id()), # At 消息发送者
+            Comp.Plain("这是去年整理的信工所各研究室导师名单哦："),
+        ]
+        yield event.chain_result(chain)
 
-    def UU_save_counters(self):
-        """保存用户发言次数记录"""
-        try:
-            # 保存用户拦截计数器
-            with open(self.user_counters_path, 'w', encoding='utf-8') as f:
-                json.dump(self.user_counters, f, ensure_ascii=False, indent=2)
-            
-            logger.debug("用户计数已保存")
-        except Exception as e:
-            logger.error(f"保存用户发言计数器失败: {e}")
+        file = Comp.File(name="信工所导师名单.pdf", file="", url=C01_PROFFESOR_LIST_URL)
+        yield event.chain_result([file])
 
-    def UU_check_blacklist_status(self, event: AstrMessageEvent) -> Tuple[bool, Optional[str], Optional[str]]:
-        """直接从配置检查消息是否来自指定用户"""
-        sender_id = str(event.get_sender_id())
+    @filter.command("uudetails")
+    async def UU_exam_details(self, event: AstrMessageEvent):
+        """查看信工所往年资料"""
+        chain = [
+            Comp.At(qq=event.get_sender_id()), # At 消息发送者
+            Comp.Plain("这是根据上一届入学同学整理的考情分析哦："),
+        ]
+        yield event.chain_result(chain)
 
-        # 直接从 self.config 获取最新的用户黑名单并检查
-        if sender_id in self.user_counters:
-            return True, "user", sender_id
-
-        return False, None, None
+        file = Comp.File(name="信工所考情分析.pdf", file="", url=C01_EXAM_DETAILS_URL)
+        yield event.chain_result([file])
     
     @filter.event_message_type(filter.EventMessageType.ALL, priority=10)
     async def UU_check_list(self, event: AstrMessageEvent):
@@ -135,7 +133,7 @@ class IIE_UU_Plugin(Star):
             return
 
         # 检查是否在已记录的列表中
-        is_listed, blacklist_type, target_id = self.UU_check_blacklist_status(event)
+        is_listed, target_name, target_id = T01_check_blacklist_status(self.user_counters, event)
         sender_id = str(event.get_sender_id())
 
         if not is_listed:
@@ -146,13 +144,13 @@ class IIE_UU_Plugin(Star):
         else:
             values_temp = self.user_counters[sender_id]
             # logger.info(f"debug=============={values_temp}")
-            reply_probability = self.UU_calculate_reply_probability(values_temp)
+            reply_probability = T01_calculate_reply_probability(values_temp, self.down_bound, self.up_bound)
             reply_probability = max(0.0, min(1.0, reply_probability))
 
             # 决定是否回复
             should_suppress_reply = False
             random_value = random.random()
-            sender_name = event.get_sender_name() or "未知用户"
+            sender_name = target_name or "未知用户"
 
             # 拦截的情况
             if random_value > reply_probability:
@@ -191,17 +189,8 @@ class IIE_UU_Plugin(Star):
             
             # 清除标记，避免对同一事件对象的后续影响
             event.set_extra("useful_utils_suppress_reply", False)
-
-    def UU_calculate_reply_probability(self, num: int):
-        if num <= self.down_bound:
-            return float(1)
-        elif num >= self.up_bound:
-            return float(0)
-        else:
-            ratio = (num - self.down_bound) / (self.up_bound - self.down_bound)
-            return 0.5 * (1 + math.cos(math.pi * ratio))
         
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
-        self.UU_save_counters()
+        T01_save_counters(self.user_counters_path, self.user_counters)
         logger.info("iie调整插件已停用，拦截计数已保存。")

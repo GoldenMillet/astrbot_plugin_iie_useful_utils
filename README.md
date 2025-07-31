@@ -24,7 +24,7 @@
 
 > 全体群成员哟~
 <a >
-  <img src="./locals/iie_front.jpg"/>
+  <img src="./locals/wifes/Mortis.jpg"/>
 </a>
 
 [官方链接](https://docs.astrbot.app/dev/star/plugin.html)

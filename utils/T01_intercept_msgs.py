@@ -56,4 +56,3 @@ def T01_check_blacklist_status(user_counters, event: AstrMessageEvent) -> Tuple[
         return True, sender_name, sender_id
 
     return False, None, None
-

@@ -5,20 +5,21 @@ import astrbot.api.message_components as Comp
 import random
 import os
 import json
-from typing import Tuple, Optional, Dict
+from typing import Dict
 
-from .constants.C01_help_msgs import C01_HELP_MSG_F, C01_CLEAR_ALL_MSG, C01_PING_MSG, C01_INVALID_DATA_MSG, C01_QQ_ID, C01_QQ_NICKNAME, C01_PROFFESOR_LIST_URL, C01_EXAM_DETAILS_URL
+from .constants.C01_help_msgs import * 
 from .utils.T01_intercept_msgs import T01_calculate_reply_probability, T01_load_counters, T01_save_counters, T01_check_blacklist_status
+from .utils.T03_random_wife import T03_random_wife, T03_load_speak_list, T03_save_speak_list
 
-@register("iie_useful_utils", "Golden_millet", "基于 AstrBot 的群机器人的功能拓展", "1.0", "https://github.com/GoldenMillet/astrbot_plugin_iie_useful_utils")
+@register("iie_useful_utils", "Golden_millet", "基于 AstrBot 的群机器人的功能拓展", "1.0", C01_GITHUB_URL)
 class IIE_UU_Plugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
 
         # T01 - 发言开始限制的上下限
-        self.up_bound = 50
-        self.down_bound = 25
+        self.up_bound = 40
+        self.down_bound = 20
 
         # T01 - 初始化说话次数计数器存储路径
         self.data_dir = os.path.join("data", "UsefulUtils")
@@ -30,10 +31,13 @@ class IIE_UU_Plugin(Star):
         self.user_counters = T01_load_counters(self.user_counters_path, self.user_counters)
         logger.info(f"发言名单已加载，用户名单共 {len(self.user_counters)} 个")
 
+        # T03 - 抽随机老婆
+        self.usr_with_speak_beh: list = T03_load_speak_list([])
+        self.usr_wife: Dict[str, str] = {}
+
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
     
-    # 注册指令的装饰器。指令名为 UU_help。注册成功后，发送 `/help` 就会触发这个指令，并回复 `你好, {user_name}!`
     @filter.command("help")
     async def UU_help(self, event: AstrMessageEvent):
         """查看帮助""" # 这是 handler 的描述，将会被解析方便用户了解插件内容。建议填写。
@@ -41,6 +45,15 @@ class IIE_UU_Plugin(Star):
         logger.info(message_chain)
 
         yield event.plain_result(C01_HELP_MSG_F) # 发送一条纯文本消息
+
+    @filter.command("ping")
+    async def UU_pingpong(self, event: AstrMessageEvent):
+        """ping pong"""
+        yield event.plain_result(C01_PING_MSG)
+    
+    #####################
+    ######## T01 ########
+    ##################### 
 
     @filter.command("uuls")
     async def UU_ls(self, event: AstrMessageEvent):
@@ -95,38 +108,20 @@ class IIE_UU_Plugin(Star):
             self.down_bound = down
             self.up_bound = up
 
-    @filter.command("ping")
-    async def UU_pingpong(self, event: AstrMessageEvent):
-        """ping pong"""
-        yield event.plain_result(C01_PING_MSG) # 发送一条纯文本消息
-    
-    @filter.command("uuproflist")
-    async def UU_professor_list(self, event: AstrMessageEvent):
-        """查看信工所当前导师名单"""
-        chain = [
-            Comp.At(qq=event.get_sender_id()), # At 消息发送者
-            Comp.Plain("这是去年整理的信工所各研究室导师名单哦："),
-        ]
-        yield event.chain_result(chain)
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("uusave")
+    async def UU_save(self, event: AstrMessageEvent):
+        """保存当前计数至本地"""
+        T01_save_counters(self.user_counters_path, self.user_counters)
+        yield event.plain_result("计数器保存成功")
 
-        file = Comp.File(name="信工所导师名单.pdf", file="", url=C01_PROFFESOR_LIST_URL)
-        yield event.chain_result([file])
-
-    @filter.command("uudetails")
-    async def UU_exam_details(self, event: AstrMessageEvent):
-        """查看信工所往年资料"""
-        chain = [
-            Comp.At(qq=event.get_sender_id()), # At 消息发送者
-            Comp.Plain("这是根据上一届入学同学整理的考情分析哦："),
-        ]
-        yield event.chain_result(chain)
-
-        file = Comp.File(name="信工所考情分析.pdf", file="", url=C01_EXAM_DETAILS_URL)
-        yield event.chain_result([file])
-    
     @filter.event_message_type(filter.EventMessageType.ALL, priority=10)
     async def UU_check_list(self, event: AstrMessageEvent):
         """检查名单"""
+
+        # T03 - 抽老婆用
+        if event.get_sender_id() not in self.usr_with_speak_beh:
+            self.usr_with_speak_beh.append(event.get_sender_id())
 
         # 如果是管理员或者没有at，则跳过
         if event.is_at_or_wake_command == False:
@@ -189,8 +184,110 @@ class IIE_UU_Plugin(Star):
             
             # 清除标记，避免对同一事件对象的后续影响
             event.set_extra("useful_utils_suppress_reply", False)
-        
+       
+    #####################
+    ######## T02 ########
+    ##################### 
+
+    @filter.command("uuproflist", alias={"导师列表", "导师名单"})
+    async def UU_professor_list(self, event: AstrMessageEvent):
+        """查看信工所当前导师名单"""
+        chain = [
+            Comp.At(qq=event.get_sender_id()), # At 消息发送者
+            Comp.Plain("这是去年整理的信工所各研究室导师名单哦："),
+        ]
+        yield event.chain_result(chain)
+
+        file = Comp.File(name="信工所导师名单.pdf", file=C01_PROFFESOR_LIST_DIR, url="")
+        yield event.chain_result([file])
+
+    @filter.command("uudetails", alias={"考试资料", "考情分析"})
+    async def UU_exam_details(self, event: AstrMessageEvent):
+        """查看信工所往年资料"""
+        chain = [
+            Comp.At(qq=event.get_sender_id()), # At 消息发送者
+            Comp.Plain("这是根据上一届入学同学整理的考情分析哦："),
+        ]
+        yield event.chain_result(chain)
+
+        file = Comp.File(name="信工所考情分析.pdf", file=C01_EXAM_DETAILS_DIR, url="")
+        yield event.chain_result([file])
+
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def UU_handle_group_add_leave(self, event: AstrMessageEvent):
+        """群增加人员发消息"""
+
+        # 确保一定是群成员增加才触发
+        if not hasattr(event, "message_obj") or not hasattr(event.message_obj, "raw_message"):
+            return
+        raw_message = event.message_obj.raw_message
+        if not raw_message or not isinstance(raw_message, dict):
+            return
+        if raw_message.get("post_type") != "notice":
+            return
+        if raw_message.get("notice_type") == "group_increase":
+            # 群成员增加事件
+            chain = [
+                Comp.Plain(C01_HELLO_MSG),
+                Comp.Image.fromFileSystem(C01_HELLO_IMG_DIR)
+            ]
+            yield event.chain_result(chain)
+        elif raw_message.get("notice_type") == "group_decrease":
+            # 群成员减少事件
+            yield event.plain_result(C01_LEAVE_MSG)
+        else:
+            return
+    
+    #####################
+    ######## T03 ########
+    ##################### 
+
+    @filter.command("uurw", alias={"随机老婆", "今日老婆"})
+    async def UU_random_wife(self, event: AstrMessageEvent):
+        """抽老婆"""
+        sender_id_str = event.get_sender_id()
+        target_id_str, avatar_url, is_hidden = T03_random_wife(sender_id_str, self.usr_with_speak_beh, self.usr_wife)
+
+        # 发送文本 - 隐藏
+        if is_hidden:
+            chain = [
+                Comp.At(qq=sender_id_str),
+                Comp.Plain(" 你的今日老婆是: "),
+                Comp.Image.fromFileSystem(avatar_url),
+                Comp.Plain(target_id_str)
+            ]
+            yield event.chain_result(chain)
+
+        # 发送文本 - 非隐藏
+        else:
+            chain = [
+                Comp.At(qq=sender_id_str),
+                Comp.Plain(" 你的今日老婆是: "),
+                Comp.Image.fromURL(avatar_url),
+                Comp.At(qq=target_id_str)
+            ]
+            yield event.chain_result(chain)
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("uurwc", alias={"清空老婆"})
+    async def UU_random_wife_clear(self, event: AstrMessageEvent):
+        """清空老婆数据"""
+        self.usr_wife = {}
+        yield event.plain_result("抽老婆配对数据已清空！")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("uurws")
+    async def UU_random_wife_save(self, event: AstrMessageEvent):
+        """保存随即老婆发言数据"""
+        T03_save_speak_list(self.usr_with_speak_beh)
+        yield event.plain_result("抽老婆发言数据已保存！")
+
+    #####################
+    ######## etc ########
+    ##################### 
+ 
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
         T01_save_counters(self.user_counters_path, self.user_counters)
-        logger.info("iie调整插件已停用，拦截计数已保存。")
+        T03_save_speak_list(self.usr_with_speak_beh)
+        logger.info("iie调整插件已停用，各种数据已保存。")

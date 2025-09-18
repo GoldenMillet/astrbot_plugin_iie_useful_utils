@@ -6,10 +6,12 @@ import random
 import os
 import json
 from typing import Dict
+from PIL import Image
 
 from .constants.C01_help_msgs import * 
 from .utils.T01_intercept_msgs import T01_calculate_reply_probability, T01_load_counters, T01_save_counters, T01_check_blacklist_status
-from .utils.T03_random_wife import T03_random_wife, T03_load_speak_list, T03_save_speak_list
+from .utils.T03_random_wife import T03_random_wife, T03_load_speak_list, T03_save_speak_list, T03_repeater, T03_msg_statistics
+from .utils.T04_ba_card import T04_loading_ba_card_info
 
 @register("iie_useful_utils", "Golden_millet", "基于 AstrBot 的群机器人的功能拓展", "1.0", C01_GITHUB_URL)
 class IIE_UU_Plugin(Star):
@@ -35,6 +37,17 @@ class IIE_UU_Plugin(Star):
         self.usr_with_speak_beh: list = T03_load_speak_list([])
         self.usr_wife: Dict[str, str] = {}
 
+        # T03 - 水群统计（qq号，qq昵称，发言次数）
+        self.msg_statistics: tuple[str, str, int] = None
+        self.msg_statistics_list = []
+
+        # T03 - 复读机
+        self.history_meg_list = ["", "", ""]
+        self.msg_repeat = ""
+
+        # T04 - ba塔罗牌
+        self.ba_card_info = T04_loading_ba_card_info()
+
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
     
@@ -55,13 +68,17 @@ class IIE_UU_Plugin(Star):
     ######## T01 ########
     ##################### 
 
-    @filter.command("uuls")
+    @filter.command("uuls", alias={"冷暴力列表", "冷暴力名单"})
     async def UU_ls(self, event: AstrMessageEvent):
         """查看所有人的记录"""
-        ret = ""
-        for key, value in self.user_counters.items():
+        ret = "🧊🧊🧊 冷暴力名单 🧊🧊🧊\n"
+
+        # 要按照顺序输出
+        counters_temp: dict = self.user_counters
+        for key, value in sorted(counters_temp.items(), key=lambda item: item[1], reverse=True):
             deny_probability_temp = 100 - int(T01_calculate_reply_probability(value, self.down_bound, self.up_bound) * 100)
-            ret = ret + f"用户 - {key}\n累计对话次数: {value} 次\n下次对话拒绝概率为: {deny_probability_temp}%\n\n"
+            if value >= 1:
+                ret = ret + f"用户 - {key}\n累计对话次数: {value} 次\n下次对话拒绝概率为: {deny_probability_temp}%\n\n"
 
         # 折叠为合并转发
         node = Comp.Node(
@@ -90,9 +107,20 @@ class IIE_UU_Plugin(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("uuclrall")
     async def UU_clr_all(self, event: AstrMessageEvent):
-        """删除全部人的信息"""
+        """删除全部人的发言记录"""
         self.user_counters = {}
         temp = C01_CLEAR_ALL_MSG
+        logger.error(temp)
+        yield event.plain_result(temp)
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("uuhalf")
+    async def UU_half(self, event: AstrMessageEvent):
+        """砍半全部人的发言记录"""
+        for key, value in self.user_counters.items():
+            self.user_counters[key] = int(value / 2)
+
+        temp = C01_HALF_ALL_MSG
         logger.error(temp)
         yield event.plain_result(temp)
 
@@ -117,13 +145,21 @@ class IIE_UU_Plugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL, priority=10)
     async def UU_check_list(self, event: AstrMessageEvent):
-        """检查名单"""
+        """收到发言要触发的内容"""
 
-        # T03 - 抽老婆用
+        # T03 - 抽老婆，水群统计用
         if event.get_sender_id() not in self.usr_with_speak_beh:
             self.usr_with_speak_beh.append(event.get_sender_id())
+        self.msg_statistics_list = T03_msg_statistics(self.msg_statistics_list, event.get_sender_id(), event.get_sender_name())
 
-        # 如果是管理员或者没有at，则跳过
+        # T03 - 复读机用
+        if event.get_message_str() != None:
+            if self.msg_repeat != event.get_message_str():
+                self.history_meg_list, self.msg_repeat, need_repeat = T03_repeater(self.history_meg_list, event.get_message_str())
+                if need_repeat:
+                    yield event.plain_result(event.get_message_str())
+
+        # 以下内容是只有在被at时才会触发的
         if event.is_at_or_wake_command == False:
             return
 
@@ -184,6 +220,26 @@ class IIE_UU_Plugin(Star):
             
             # 清除标记，避免对同一事件对象的后续影响
             event.set_extra("useful_utils_suppress_reply", False)
+
+    @filter.command("uusq", alias={"水群统计", "今日水群", "水群排行", "水群排名"})
+    async def UU_msg_statistics(self, event: AstrMessageEvent):
+        """水群统计输出"""
+        ret = "🏆群聊活跃度排行榜\n\n"
+        rank = 1
+        for item in sorted(self.msg_statistics_list, key=lambda x: x[2], reverse=True):
+            if rank == 1:
+                ret = ret + "🥇"
+            elif rank ==  2:
+                ret = ret + "🥈"
+            elif rank ==  3:
+                ret = ret + "🥉"
+            elif rank > 10:
+                break
+            else:
+                ret = ret + "🎖️"
+            ret = ret + f"用户 - {item[1]}\n累计水群次数: {item[2]} 条\n\n"
+            rank += 1
+        yield event.plain_result(ret)
        
     #####################
     ######## T02 ########
@@ -278,13 +334,68 @@ class IIE_UU_Plugin(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("uurws")
     async def UU_random_wife_save(self, event: AstrMessageEvent):
-        """保存随即老婆发言数据"""
+        """保存随机老婆发言数据"""
         T03_save_speak_list(self.usr_with_speak_beh)
         yield event.plain_result("抽老婆发言数据已保存！")
+
+    @filter.command("uumtf", alias={"随机男娘", "今日男娘"})
+    async def UU_random_mtf(self, event: AstrMessageEvent):
+        """抽男娘"""
+        random_index = random.randint(0, len(self.msg_statistics_list) - 1)
+        random_item = self.msg_statistics_list[random_index]
+
+        # 折叠为合并转发
+        node = Comp.Node(
+            uin = random_item[0],
+            name = random_item[1],
+            content = [
+                Comp.Plain("我是男娘")
+            ]
+        )
+        yield event.chain_result([node])
+
+    #####################
+    ######## T04 ########
+    ##################### 
+
+    @filter.command("uubac", alias={"ba塔罗牌", "塔罗牌"})
+    async def UU_random_ba_card(self, event: AstrMessageEvent):
+        """ba塔罗牌功能"""
+        length = len(self.ba_card_info)
+        random_card_index = random.randint(0, length - 1)
+        random_card_updown = random.randint(0, 1)
+        if random_card_updown == 0:
+            updown_desc = "顺位"
+            updown_short = "up"
+        else:
+            updown_desc = "逆位"
+            updown_short = "down"
+
+        desc_temp = f"""
+老师，这是您抽的塔罗牌:
+
+{self.ba_card_info[random_card_index]["name"]}({updown_desc})
+
+{self.ba_card_info[random_card_index][updown_short + "_text"]}
+        """
+
+        chain = [
+            Comp.At(qq=event.get_sender_id()),
+            Comp.Plain(desc_temp),
+            Comp.Image.fromFileSystem(self.ba_card_info[random_card_index]["img_url_" + updown_short])
+        ]
+        yield event.chain_result(chain)
 
     #####################
     ######## etc ########
     ##################### 
+
+    @filter.command("uursa", alias={"全部保存", "保存全部"})
+    async def UU_save_all(self, event: AstrMessageEvent):
+        """保存插件内所有数据"""
+        T01_save_counters(self.user_counters_path, self.user_counters)
+        T03_save_speak_list(self.usr_with_speak_beh)
+        yield event.plain_result("插件内所有数据已经保存")
  
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
